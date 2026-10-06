@@ -49,15 +49,20 @@ h1, h2, h3, h4 { color: var(--ink); letter-spacing: -0.01em; }
 .kpi .value.ok { color: var(--success); } .kpi .value.bad { color: var(--danger); }
 .kpi .sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
 @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-.pill { display: inline-flex; align-items: center; gap: 7px; border-radius: 999px; padding: 4px 11px; font-size: 13px;
-  font-weight: 600; background: var(--sky2); color: var(--ink); border: 1px solid var(--line); }
+.pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 13px; font-size: 13px;
+  font-weight: 700; color: #fff; letter-spacing: .1px; }
 .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
 
 /* payroll cards */
 div[class*="st-key-pr-"] { background: #fff; border: 1px solid var(--line) !important; border-radius: 8px !important;
   box-shadow: 0 1px 2px rgba(3,29,99,.04); padding: 16px 18px 8px 18px; }
 .pr-title { font-weight: 700; font-size: 19px; margin: 12px 0 2px 0; color: var(--ink); }
-.pr-meta { color: var(--muted); font-size: 14px; margin-bottom: 14px; }
+.pr-meta { color: var(--muted); font-size: 14px; margin-bottom: 12px; }
+.story { background: var(--sky2); border-radius: 6px; padding: 9px 12px; font-size: 14px; line-height: 1.45;
+         color: var(--ink); margin-bottom: 14px; min-height: 98px; }
+.story b { color: var(--navy); }
+.story.wide { min-height: 0; margin: -4px 0 14px 0; font-size: 15px; }
+.intro { color: var(--muted); font-size: 15px; margin: -6px 0 16px 0; }
 .pr-row { display: flex; gap: 34px; margin-bottom: 10px; }
 .pr-num { font-weight: 700; font-size: 24px; color: var(--ink); line-height: 1.1; display: flex; align-items: center; gap: 6px; }
 .pr-lbl { color: var(--muted); font-size: 13px; margin-top: 2px; }
@@ -86,7 +91,7 @@ div[class*="st-key-held-done"] { border-left-color: var(--success) !important; }
 .h-ben { font-weight: 700; font-size: 18px; color: var(--ink); }
 .risk { font-weight: 700; font-size: 13px; color: var(--danger); }
 .tag { display: inline-flex; align-items: center; gap: 5px; background: var(--sky2); color: var(--ink); border-radius: 6px;
-  padding: 2px 8px; font-size: 12.5px; border: 1px solid var(--line); }
+  padding: 3px 9px; font-size: 12.5px; }
 .amt { font-weight: 700; font-size: 22px; color: var(--danger); }
 .exp { color: var(--muted); font-size: 14px; }
 .reason { font-size: 15.5px; line-height: 1.5; margin: 4px 0; color: var(--ink); }
@@ -122,12 +127,9 @@ section[data-testid="stSidebar"] hr { border-color: rgba(191,224,255,.18); }
 .conn-row .txt { flex: 1; font-size: 15px; font-weight: 600; line-height: 1.25; }
 .conn-row .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .conn-row .txt small { display: block; font-weight: 400; color: var(--sky); font-size: 12.5px; margin-top: 4px; }
-.state { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px;
+.state { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px;
          font-size: 12px; font-weight: 700; color: #fff !important; white-space: nowrap; }
 .state.on { background: var(--success); } .state.off { background: var(--danger); }
-.state i { width: 7px; height: 7px; border-radius: 50%; background: #fff; }
-.state.on i { animation: pulse 1.8s ease-in-out infinite; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 .side-label { font-size: 13px; color: var(--sky) !important; font-weight: 600; margin: 4px 0 4px 0; }
 .who { font-size: 21px; font-weight: 700; line-height: 1.2; }
 
@@ -204,6 +206,24 @@ _PATHS = {
 
 def icon(name, cls=""):
     return f'<svg class="ico {cls}" viewBox="0 0 24 24">{_PATHS[name]}</svg>'
+
+
+STORIES = {   # what was planted in each practice payroll (built in scenarios.py)
+    "North": "Nothing. A normal month, to show the Guard stays quiet when all is well.",
+    "South": "Extra zeros, a tripled payment, 11 people using one phone, 3 people paid into one account, and an account switched just before payday.",
+    "East": "The same person approved it twice at 2:46 at night, in under 30 seconds, plus one KES 6,000,000 payment.",
+}
+
+
+def story(title):
+    region = (title or "").split("· ")[-1].split(" ")[0]
+    return STORIES.get(region) if (title or "").startswith("October 2026") else None
+
+
+def pill(label, colour):
+    """A solid status pill: green = go, yellow = careful, red = stop."""
+    ink = "#1A1F2B" if colour == WARN else "#fff"
+    return f'<span class="pill" style="background:{colour};color:{ink}">{label}</span>'
 
 
 def dot(color):
@@ -430,7 +450,7 @@ with st.sidebar:
     st.markdown(f'<div class="brand">{logo}<div class="name">Payroll Release Guard</div></div>',
                 unsafe_allow_html=True)
     ai_ok = ai_online()
-    state = lambda ok: f'<span class="state {"on" if ok else "off"}"><i></i>{"Online" if ok else "Offline"}</span>'
+    state = lambda ok: f'<span class="state {"on" if ok else "off"}">{"Online" if ok else "Offline"}</span>'
     db_ok = db_online()
     st.markdown(
         f'<div class="conn"><div class="conn-row">{icon("db")}<div class="txt"><div class="top">Database{state(db_ok)}</div>'
@@ -563,6 +583,9 @@ def show_payroll(pid):
     title, sub, colour, ic = verdict_text(c, approval)
     header(meta["title"] or f"Payroll {meta['payroll_number']}",
            f"{int(c['lines']):,} payments · {full_money(cur, c['held_amount'] + c['safe_amount'])}")
+    if story(meta["title"]):
+        st.markdown(f'<div class="story wide"><b>Practice payroll. Planted:</b> {story(meta["title"])}</div>',
+                    unsafe_allow_html=True)
     st.markdown(f'<div class="card verdict" style="--c:{colour}">{icon(ic)}<div><div class="t">{title}</div>'
                 f'<div class="s">{sub}</div></div></div>'
                 '<div class="kpis" style="grid-template-columns: repeat(2, minmax(0,1fr))">'
@@ -647,6 +670,8 @@ def release_desk():
     checks = latest_checks()
     pending = checks[checks["stage"] == "pending"].sort_values("created_on")
     if len(pending):
+        st.markdown('<div class="intro">Three practice payrolls for October, made up for this demo. '
+                    'Mistakes were planted in them on purpose to show what the Guard catches.</div>', unsafe_allow_html=True)
         cur = pending["currency"].iloc[0]
         st.markdown('<div class="kpis" style="grid-template-columns: repeat(3, minmax(0,1fr))">'
                     + kpi("Waiting to be paid", f"{len(pending)} payrolls", f"{int(pending['lines'].sum()):,} payments")
@@ -660,11 +685,12 @@ def release_desk():
             label, _, colour, _ = verdict_text(r, approval)
             dec = payroll_decision(int(r["payroll_id"]))
             bad_approval = bool(critical(approval))
+            tale = f'<div class="story"><b>Planted:</b> {story(r["title"])}</div>' if story(r["title"]) else ""
             with col.container(key=f"pr-{r['payroll_id']}"):
                 st.markdown(
-                    f'<span class="pill">{dot(colour)}{label}</span> <span class="tag">Demo</span>'
+                    f'{pill(label, colour)} <span class="tag">Demo</span>'
                     f'<div class="pr-title">{html.escape(r["title"] or "")}</div>'
-                    f'<div class="pr-meta">{int(r["lines"]):,} payments · {money(r["currency"], r["held_amount"] + r["safe_amount"])}</div>'
+                    f'<div class="pr-meta">{int(r["lines"]):,} payments · {money(r["currency"], r["held_amount"] + r["safe_amount"])}</div>{tale}'
                     f'<div class="pr-row"><div><div class="pr-num {"bad" if r["held_amount"] else "ok"}">'
                     f'{money(r["currency"], r["held_amount"])}</div><div class="pr-lbl">Held</div></div>'
                     f'<div><div class="pr-num {"bad" if bad_approval else "ok"}">'
@@ -684,7 +710,7 @@ def release_desk():
         with a.container(key=f"pr-red-{big['payroll_id']}"):
             n = int(big["held_lines"])
             st.markdown(
-                f'<span class="pill">{dot(DANGER)}Would have been held</span>'
+                f'{pill("Would have been held", DANGER)}'
                 f'<div class="pr-title">Payroll {html.escape(str(big["payroll_number"]))}</div>'
                 f'<div class="pr-meta">Already paid · {plural(big["lines"], "payment")}</div>'
                 f'<div class="pr-row"><div><div class="pr-num bad">{full_money(big["currency"], big["held_amount"])}</div>'
@@ -704,7 +730,7 @@ def release_desk():
         total = sum(1 for a_json in live["approval_json"] if critical(json.loads(a_json)))
         with b.container(key="pr-red-approvals"):
             st.markdown(
-                f'<span class="pill">{dot(DANGER)}Approval problems</span>'
+                f'{pill("Approval problems", DANGER)}'
                 f'<div class="pr-title">{total} of {len(live)} payrolls</div>'
                 f'<div class="pr-meta">Already paid</div>'
                 + "".join(f'<div class="reason"><b>{n}</b> {words}</div>' for words, n in counts.items() if n),
