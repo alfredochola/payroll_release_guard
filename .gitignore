@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+# local data and secrets - never commit
+.env
+.guard_key
+*.db
+*.db-*
+*.log
+refresh.lock
