@@ -671,7 +671,7 @@ def release_desk():
     pending = checks[checks["stage"] == "pending"].sort_values("created_on")
     if len(pending):
         st.markdown('<div class="intro">Three practice payrolls for October, made up for this demo. '
-                    'Mistakes were planted in them on purpose to show what the Guard catches.</div>', unsafe_allow_html=True)
+                    'Suspicious anomalies were planted in them on purpose to show what the Guard catches.</div>', unsafe_allow_html=True)
         cur = pending["currency"].iloc[0]
         st.markdown('<div class="kpis" style="grid-template-columns: repeat(3, minmax(0,1fr))">'
                     + kpi("Waiting to be paid", f"{len(pending)} payrolls", f"{int(pending['lines'].sum()):,} payments")
@@ -755,24 +755,24 @@ def proof():
 
     def card(title, m, dark):
         return (f'<div class="card vscard{" g" if dark else ""}"><h4>{title}</h4>'
-                f'<div class="vsrow"><span class="l">Mistakes caught</span><span class="n">{m["tp"]} of {total}</span></div>'
+                f'<div class="vsrow"><span class="l">Anomalies caught</span><span class="n">{m["tp"]} of {total}</span></div>'
                 f'<div class="vsrow"><span class="l">Good payments wrongly stopped</span><span class="n">{m["fp"]}</span></div></div>')
     st.markdown('<div class="vs">' + card(f'{icon("shield")} Release Guard', g, True)
                 + card("Usual check: over 10 times the average", s, False) + "</div>", unsafe_allow_html=True)
-    st.markdown('<div class="sec">Caught, by type of mistake</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec">Caught, by type of anomaly</div>', unsafe_allow_html=True)
     bc = pd.DataFrame(r["by_case"])
     bc = bc[bc["kind"] == "problem"].copy()
-    bc["Mistake"] = bc["case"].map(PLAIN).fillna(bc["case"])
-    prob = bc.melt(id_vars=["Mistake"], value_vars=["guard", "rule"], var_name="Check", value_name="Caught")
+    bc["Anomaly"] = bc["case"].map(PLAIN).fillna(bc["case"])
+    prob = bc.melt(id_vars=["Anomaly"], value_vars=["guard", "rule"], var_name="Check", value_name="Caught")
     prob["Check"] = prob["Check"].map({"guard": "Release Guard", "rule": "Usual check"})
     st.altair_chart(styled(alt.Chart(prob).mark_bar(cornerRadiusTopRight=3, cornerRadiusBottomRight=3).encode(
-        y=alt.Y("Mistake:N", title=None, axis=alt.Axis(labelLimit=300), sort=list(bc.sort_values("guard", ascending=False)["Mistake"])),
+        y=alt.Y("Anomaly:N", title=None, axis=alt.Axis(labelLimit=300), sort=list(bc.sort_values("guard", ascending=False)["Anomaly"])),
         yOffset="Check:N", x=alt.X("Caught:Q", title=None, axis=alt.Axis(format="%"), scale=alt.Scale(domain=[0, 1])),
         color=alt.Color("Check:N", scale=alt.Scale(domain=["Release Guard", "Usual check"], range=[NAVY, SKY]),
                         legend=alt.Legend(orient="bottom", title=None)),
-        tooltip=["Mistake", "Check", alt.Tooltip("Caught:Q", format=".0%")]).properties(height=340)), width="stretch")
+        tooltip=["Anomaly", "Check", alt.Tooltip("Caught:Q", format=".0%")]).properties(height=340)), width="stretch")
     st.markdown(f'<div class="foot">Tested on {r["trials"]} practice payrolls ({r["lines"]:,} payments) with {total} planted '
-                f'mistakes and {good:,} good payments. Doubled payments are let through on purpose: a doubling is often a '
+                f'suspicious anomalies and {good:,} good payments. Doubled payments are let through on purpose: a doubling is often a '
                 'genuine raise.</div>', unsafe_allow_html=True)
 
 
