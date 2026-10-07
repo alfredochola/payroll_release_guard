@@ -12,6 +12,7 @@ import time
 import numpy as np
 import pandas as pd
 
+import ai_scan
 import guard
 import scenarios
 import store
@@ -23,7 +24,10 @@ POSITIVE = {  # case type -> (difficulty, how it is planted)
     "Linked identities (one phone)": "subtle", "Shared account (3 people)": "subtle",
     "Account switched before payday": "subtle",
 }
-DECOY = ["Genuine raise (+KES 2,000)", "Household sharing a phone", "Caregiver account for two"]
+DECOY = ["Genuine raise (+KES 2,000)", "Household sharing a phone", "Caregiver account for two",
+         "New bank account, normal amount"]
+SUBTLE = "Subtle combination"     # for the AI scan: new account 24 days ago + amount 1.8x; no single fact breaks a check
+SUBTLE_PER_PAYROLL = 3
 
 
 def run(progress=print):
@@ -34,7 +38,8 @@ def run(progress=print):
         sept = pd.read_sql_query(
             """SELECT p.ben, p.account, p.amount FROM payments p JOIN payrolls r USING (payroll_id)
                 WHERE r.source = 'demo' AND r.stage = 'paid' AND r.payroll_number LIKE 'PN-D6%'
-                  AND p.ben NOT IN (SELECT ben FROM payments WHERE planted IS NOT NULL)""", con)
+                  AND p.ben NOT IN (SELECT ben FROM payments WHERE planted IS NOT NULL
+                                    AND planted <> 'subtle combination')""", con)
     phone_of = base_ctx["ben_info"]["phone"]
     phone_sizes = base_ctx["phone_sizes"]
     household = [b for b in sept["ben"] if phone_sizes.get(phone_of.get(b), 1) in (2, 3)]
@@ -82,6 +87,20 @@ def run(progress=print):
         lines.loc[i, ["account", "truth", "case"]] = [new_acc, 1, "Account switched before payday"]
         for i in take(4):                                  # genuine raises: look unusual, are fine
             lines.loc[i, ["amount", "case"]] = [lines.at[i, "amount"] + 2000, "Genuine raise (+KES 2,000)"]
+        # planted after the cases above, so the original 550 problems and their results are unchanged
+        steady = [i for i in free if lines.at[i, "case"] == "Normal payment"
+                  and base_ctx["own"]["expected"].get(lines.at[i, "ben"]) == lines.at[i, "amount"]]
+        undo = {}
+        for k, i in enumerate(steady[:2 * SUBTLE_PER_PAYROLL]):
+            undo[i] = (lines.at[i, "account"], lines.at[i, "amount"])
+            acc = f"AC-SUB{t}-{k}"
+            ctx["account_sizes"][acc] = 1
+            ctx["account_opened"][acc] = "2026-09-11 10:00:00"
+            if k < SUBTLE_PER_PAYROLL:
+                lines.loc[i, ["account", "amount", "truth", "case", "excess"]] = [
+                    acc, lines.at[i, "amount"] * 1.8, 1, SUBTLE, lines.at[i, "amount"] * 0.8]
+            else:                                          # look-alike: changed bank, normal amount
+                lines.loc[i, ["account", "case"]] = [acc, "New bank account, normal amount"]
         for i in range(LINES):
             b = lines.at[i, "ben"]
             if lines.at[i, "case"] == "Normal payment" and b in household:
@@ -93,12 +112,29 @@ def run(progress=print):
             info["phone"] = info.index.map(changed_phone)
             ctx["ben_info"] = pd.concat([ben_info.drop(info.index), info])
 
-        scored = guard.score_lines(lines[["payment_id", "ben", "account", "amount"]], ctx, "KES", "2026-10-05 09:00:00")
+        cols = ["payment_id", "ben", "account", "amount"]
+        original = lines.copy()                            # the payroll exactly as in the original test
+        for i, (acc, amount) in undo.items():
+            original.loc[i, ["account", "amount"]] = [acc, amount]
+        scored = guard.score_lines(original[cols], ctx, "KES", "2026-10-05 09:00:00")
         lines["guard"] = (scored["risk"] >= guard.HOLD_AT).astype(int).values
-        lines["rule"] = guard.simple_rule(lines).astype(int).values
-        rows.append(lines[["truth", "case", "excess", "guard", "rule", "amount"]])
+        lines["rule"] = guard.simple_rule(original).astype(int).values
+        with_subtle = guard.score_lines(lines[cols], ctx, "KES", "2026-10-05 09:00:00")
+        lines["guard_new"] = (with_subtle["risk"] >= guard.HOLD_AT).astype(int).values
+        found = ai_scan.find(with_subtle, ctx, "2026-10-05 09:00:00")
+        lines["ai"] = lines["payment_id"].isin(found["payment_id"]).astype(int).values
+        # in the original test the converted payments were ordinary ones
+        lines["orig_case"], lines["orig_truth"] = lines["case"], lines["truth"]
+        for i in undo:
+            b = lines.at[i, "ben"]
+            lines.loc[i, ["orig_case", "orig_truth"]] = [
+                "Household sharing a phone" if b in household else
+                "Caregiver account for two" if b in caregiver_bens else "Normal payment", 0]
+        rows.append(lines[["truth", "case", "excess", "guard", "guard_new", "rule", "ai", "amount", "orig_case",
+                           "orig_truth"]])
 
-    res = pd.concat(rows, ignore_index=True)
+    every = pd.concat(rows, ignore_index=True)
+    res = every.assign(case=every["orig_case"], truth=every["orig_truth"])   # the original test, exactly as before
 
     def metrics(col):
         tp = int(((res[col] == 1) & (res["truth"] == 1)).sum())
@@ -119,8 +155,16 @@ def run(progress=print):
         by_case.append(dict(case=case, kind="problem" if positive else "look-alike (not a problem)",
                             difficulty=POSITIVE.get(case, "-"), lines=len(group),
                             guard=float(group["guard"].mean()), rule=float(group["rule"].mean())))
-    result = dict(trials=TRIALS, lines=len(res), problems=int(res["truth"].sum()),
-                  guard=metrics("guard"), rule=metrics("rule"), by_case=by_case,
+    sub = every[every["case"] == SUBTLE]
+    good = every[every["truth"] == 0]
+    ai = dict(subtle=len(sub), rules_caught=int(sub["guard_new"].sum()), ai_caught=int(sub["ai"].sum()),
+              ai_false_alarms=int(good["ai"].sum()), good=len(good),
+              lookalikes=int((every["case"] == "New bank account, normal amount").sum()),
+              lookalikes_flagged=int(every.loc[every["case"] == "New bank account, normal amount", "ai"].sum()),
+              other_missed_found=int(((every["truth"] == 1) & (every["case"] != SUBTLE) & (every["guard_new"] == 0)
+                                      & (every["ai"] == 1)).sum()))
+    result = dict(trials=TRIALS, lines=len(res), problems=int(res["truth"].sum()), good=int((res["truth"] == 0).sum()),
+                  guard=metrics("guard"), rule=metrics("rule"), by_case=by_case, ai=ai,
                   seconds=round(time.time() - t0, 1))
     with store.connect() as con:
         con.execute("INSERT INTO evaluation (run_at, result_json) VALUES (?,?)", (store.now(), json.dumps(result)))
@@ -140,4 +184,5 @@ if __name__ == "__main__":
               f"(tp {m['tp']}, fp {m['fp']}, fn {m['fn']})")
     for c in r["by_case"]:
         print(f"   {c['case']:34} {c['kind']:27} n={c['lines']:5}  guard {c['guard']:.0%}  rule {c['rule']:.0%}")
+    print("AI scan:", r["ai"])
     print("seconds", r["seconds"])

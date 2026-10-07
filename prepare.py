@@ -7,6 +7,7 @@ import json
 import sys
 import time
 
+import ai_scan
 import evaluate
 import extract
 import guard
@@ -20,10 +21,12 @@ if __name__ == "__main__":
             "SELECT COUNT(*) FROM payrolls WHERE source='live'").fetchone()[0]:
         extract.run()
     with store.connect() as con:
-        for t in ("checks", "held", "decisions", "evaluation"):
+        con.executescript(ai_scan.SCHEMA)
+        for t in ("checks", "held", "decisions", "evaluation", "ai_scans", "ai_findings"):
             con.execute(f"DELETE FROM {t}")
         con.execute("""DELETE FROM audit_log WHERE event IN ('Released', 'Cancelled', 'Held the whole payroll',
-                       'Sent back for re-approval') OR event LIKE 'Released %'""")
+                       'Sent back for re-approval', 'Held after AI scan', 'Dismissed after AI scan', 'AI scan')
+                       OR event LIKE 'Released %'""")
     october = scenarios.build()
     print("Demo programme ready")
     with store.connect() as con:

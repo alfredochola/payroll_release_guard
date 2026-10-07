@@ -34,7 +34,7 @@ def global_context(con):
         str(con.execute("SELECT COUNT(*) FROM beneficiaries").fetchone()[0])
     if _GLOBAL.get("stamp") == stamp:
         return _GLOBAL
-    ben = pd.read_sql_query("SELECT ben, project_id, id_checked, phone FROM beneficiaries", con)
+    ben = pd.read_sql_query("SELECT ben, project_id, id_checked, phone, created_on FROM beneficiaries", con)
     acc = pd.read_sql_query("SELECT ben, account, created_on FROM accounts", con).dropna(subset=["account"])
     stats = pd.read_sql_query(
         """SELECT r.payroll_id, r.currency, r.created_on, MAX(p.amount) AS top FROM payments p
@@ -66,7 +66,7 @@ def build_context(con, project_id, currency, before, exclude_payroll):
         con, params=(project_id, before, exclude_payroll))
     hist = hist.sort_values("created_on")
     own = hist.groupby("ben").agg(n=("amount", "size"), expected=("amount", "median"),
-                                  top=("amount", "max"), last_account=("account", "last"))
+                                  top=("amount", "max"), last_account=("account", "last"), last=("amount", "last"))
     stats = g["payroll_stats"]
     others = stats[stats["payroll_id"] != exclude_payroll]
     earlier = others[(others["currency"] == currency) & (others["created_on"] < before)]

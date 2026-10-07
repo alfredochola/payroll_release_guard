@@ -3,7 +3,8 @@
 The live test data mostly pays 1 or 10 KES, so it cannot show realistic amounts. This programme has six months
 of normal monthly history and three October payrolls waiting for release:
   North  - clean, should be released in full
-  South  - planted problems in individual payments, should release with holds
+  South  - planted problems in individual payments, should release with holds; plus 6 subtle combinations
+           that no check holds, for the AI scan to find
   East   - planted approval problems and one huge payment, should be held
 Every planted problem is recorded in payments.planted so the demo can be checked against the right answer.
 """
@@ -87,6 +88,7 @@ def build():
                     amount = p["amount"]
                     if month == "2026-09" and rng.random() < 0.02:     # a few genuine changes, e.g. a larger household
                         p["amount"] = amount = amount + 2000
+                        p["raised"] = True
                     payments.append((pid, p["ben"], p["account"], amount, None))
 
         # October payrolls waiting for release
@@ -116,6 +118,15 @@ def build():
             p["account"] = shared_acc
             plants[p["ben"]] = ("shared account", 1)
         plants[by_region["East"][77]["ben"]] = ("three extra zeros", 1000)
+        # subtle combinations for the AI scan: each fact is under every check's limit, together they are unusual.
+        # A new bank account three weeks ago, the amount nudged up 80%, and an ID that was never verified.
+        subtle = [p for p in south_people[850:] if not p.get("raised")][:6]
+        subtle_old = {}
+        for k, p in enumerate(subtle):
+            subtle_old[p["ben"]] = p["account"]
+            p["account"] = code("acc", f"subtle-{k}")
+            p["id_checked"] = False
+            plants[p["ben"]] = ("subtle combination", 1.8)
 
         for region, pid in october.items():
             for p in by_region[region]:
@@ -130,6 +141,9 @@ def build():
              "2026-03-01 10:00:00", "demo") for p in people])
         accounts = [(p["ben"], p["account"], "2026-03-01 10:00:00", "demo") for p in people]
         accounts.append((switched["ben"], old_account, "2026-03-01 10:00:00", "demo"))
+        accounts += [(ben, acc, "2026-03-01 10:00:00", "demo") for ben, acc in subtle_old.items()]
+        new_subtle = {p["account"] for p in subtle}
+        accounts = [a if a[1] not in new_subtle else (a[0], a[1], "2026-09-10 11:30:00", "demo") for a in accounts]
         accounts = [a if a[1] != switched["account"] else (a[0], a[1], "2026-10-03 16:20:00", "demo") for a in accounts]
         con.executemany("INSERT INTO accounts VALUES (?,?,?,?)", accounts)
         store.audit(con, "Demo programme created",

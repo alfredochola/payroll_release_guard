@@ -9,6 +9,7 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+import ai_scan
 import evaluate
 import explainer
 import extract
@@ -210,7 +211,7 @@ def icon(name, cls=""):
 
 STORIES = {   # what was planted in each practice payroll (built in scenarios.py)
     "North": "Nothing. A normal month, to show the Guard stays quiet when all is well.",
-    "South": "Extra zeros, a tripled payment, 11 people using one phone, 3 people paid into one account, and an account switched just before payday.",
+    "South": "Extra zeros, a tripled payment, 11 people using one phone, 3 people paid into one account, an account switched just before payday, and 6 subtle cases only the AI scan finds.",
     "East": "The same person approved it twice at 2:46 at night, in under 30 seconds, plus one KES 6,000,000 payment.",
 }
 
@@ -346,11 +347,24 @@ def ai_online():
     return explainer.ready()
 
 
+def with_ai_holds(checks):
+    """Payments a reviewer held after the AI scan move from 'safe to release' to 'held'."""
+    ai = q("""SELECT d.payroll_id, COUNT(*) AS n, SUM(p.amount) AS amount FROM decisions d
+               JOIN payments p USING (payment_id) WHERE d.decision = 'Held after AI scan' GROUP BY d.payroll_id""")
+    if ai.empty or checks.empty:
+        return checks
+    checks = checks.merge(ai, on="payroll_id", how="left").fillna({"n": 0, "amount": 0})
+    checks["held_lines"] += checks["n"]
+    checks["held_amount"] += checks["amount"]
+    checks["safe_amount"] -= checks["amount"]
+    return checks.drop(columns=["n", "amount"])
+
+
 def latest_checks():
-    return q("""SELECT c.*, r.payroll_number, r.title, r.project_id, r.currency, r.total_amount, r.created_on,
+    return with_ai_holds(q("""SELECT c.*, r.payroll_number, r.title, r.project_id, r.currency, r.total_amount, r.created_on,
                        r.source, r.stage, p.name AS project
                   FROM checks c JOIN payrolls r USING (payroll_id) LEFT JOIN projects p USING (project_id)
-                 WHERE c.check_id IN (SELECT MAX(check_id) FROM checks GROUP BY payroll_id)""")
+                 WHERE c.check_id IN (SELECT MAX(check_id) FROM checks GROUP BY payroll_id)"""))
 
 
 def payroll_decision(pid):
@@ -573,7 +587,7 @@ def show_payroll(pid):
     if st.button("Payrolls", icon=":material/arrow_back:"):
         st.session_state.pop("open", None)
         st.rerun()
-    chk = q("SELECT * FROM checks WHERE payroll_id=? ORDER BY check_id DESC LIMIT 1", (pid,))
+    chk = with_ai_holds(q("SELECT * FROM checks WHERE payroll_id=? ORDER BY check_id DESC LIMIT 1", (pid,)))
     if chk.empty:
         run_with_engine("Checking every payment", lambda: guard.check(pid))
         st.rerun()
@@ -646,10 +660,20 @@ def show_payroll(pid):
                 st.rerun()
 
     held = q("SELECT * FROM held WHERE check_id=? ORDER BY risk DESC, amount DESC", (int(c["check_id"]),))
+    ai_held = q("""SELECT f.payment_id, f.ben, f.amount, f.why_json FROM decisions d JOIN ai_findings f USING (payment_id)
+                    WHERE d.payroll_id = ? AND d.decision = 'Held after AI scan'
+                      AND f.scan_id = (SELECT MAX(scan_id) FROM ai_findings WHERE payment_id = f.payment_id)""", (pid,)) \
+        if one("SELECT COUNT(*) FROM sqlite_master WHERE name = 'ai_findings'")[0] else pd.DataFrame()
+    if len(ai_held):
+        held = pd.concat([held, pd.DataFrame([dict(
+            check_id=int(c["check_id"]), payment_id=int(a.payment_id), ben=a.ben, amount=a.amount, expected=None, risk=0,
+            reasons_json=json.dumps([dict(check="AI", text=w + ".") for w in json.loads(a.why_json)]), ai_sentence=None)
+            for a in ai_held.itertuples()])], ignore_index=True)
     if held.empty:
         return
     st.markdown(f'<div class="sec">Held · {len(held)}</div>', unsafe_allow_html=True)
     dec_lines = line_decisions(int(c["check_id"]))
+    dec_lines.update({int(a.payment_id): ("Held after AI scan", reviewer, None) for a in ai_held.itertuples()})
     held["phone"] = [next((r.get("phone") for r in json.loads(x) if r.get("phone")), None) for x in held["reasons_json"]]
     shown = set()
     for _, line in held.iterrows():
@@ -759,6 +783,16 @@ def proof():
                 f'<div class="vsrow"><span class="l">Good payments wrongly stopped</span><span class="n">{m["fp"]}</span></div></div>')
     st.markdown('<div class="vs">' + card(f'{icon("shield")} Release Guard', g, True)
                 + card("Usual check: over 10 times the average", s, False) + "</div>", unsafe_allow_html=True)
+    a = r.get("ai")
+    if a:
+        st.markdown('<div class="sec">AI scan: no rules</div><div class="vs">'
+                    f'<div class="card vscard g"><h4>{icon("shield")} AI scan</h4>'
+                    f'<div class="vsrow"><span class="l">Subtle combinations caught</span><span class="n">{a["ai_caught"]} of {a["subtle"]}</span></div>'
+                    f'<div class="vsrow"><span class="l">Good payments flagged</span><span class="n">{a["ai_false_alarms"]}</span></div></div>'
+                    '<div class="card vscard"><h4>The checks alone</h4>'
+                    f'<div class="vsrow"><span class="l">Subtle combinations caught</span><span class="n">{a["rules_caught"]} of {a["subtle"]}</span></div>'
+                    f'<div class="vsrow"><span class="l">Why</span><span class="l">no single fact breaks a limit</span></div></div>'
+                    '</div>', unsafe_allow_html=True)
     st.markdown('<div class="sec">Caught, by type of anomaly</div>', unsafe_allow_html=True)
     bc = pd.DataFrame(r["by_case"])
     bc = bc[bc["kind"] == "problem"].copy()
@@ -773,14 +807,94 @@ def proof():
         tooltip=["Anomaly", "Check", alt.Tooltip("Caught:Q", format=".0%")]).properties(height=340)), width="stretch")
     st.markdown(f'<div class="foot">Tested on {r["trials"]} practice payrolls ({r["lines"]:,} payments) with {total} planted '
                 f'suspicious anomalies and {good:,} good payments. Doubled payments are let through on purpose: a doubling is often a '
-                'genuine raise.</div>', unsafe_allow_html=True)
+                'genuine raise.' + (f' AI scan: {r["ai"]["subtle"]} subtle combinations (a new bank account and an amount '
+                f'up 80%) and {r["ai"]["lookalikes"]} genuine bank changes added to the same payrolls.' if r.get("ai") else "")
+                + '</div>', unsafe_allow_html=True)
+
+
+# ------------------------------------------------------------------ AI scan
+def ai_decisions():
+    d = q("""SELECT payment_id, decision FROM decisions WHERE decision IN ('Held after AI scan', 'Dismissed after AI scan')
+              ORDER BY id""")
+    return dict(zip(d["payment_id"].astype(int), d["decision"]))
+
+
+def ai_view():
+    header("AI scan")
+    st.markdown('<div class="intro">No rules. The AI learns what an ordinary payment looks like from the payroll itself, '
+                'then points out payments that do not fit, including ones the checks let through.</div>',
+                unsafe_allow_html=True)
+    with store.connect() as con:
+        con.executescript(ai_scan.SCHEMA)
+    waiting = one("SELECT COUNT(*) FROM payments p JOIN payrolls r USING (payroll_id) WHERE r.stage = 'pending'")[0]
+    if st.button("Let AI find anomalies", icon=":material/auto_awesome:", type="primary", key="ai-run"):
+        r = run_with_engine(f"AI scanning {waiting:,} payments", lambda: ai_scan.run())
+        st.session_state["toast"] = f"AI scan done · {plural(r['found'], 'unusual payment')} found"
+        st.rerun()
+    scan = q("SELECT * FROM ai_scans ORDER BY scan_id DESC LIMIT 1")
+    if scan.empty:
+        st.markdown(f'<div class="card kpi"><div class="label">Not scanned yet</div><div class="sub">Press the button to let '
+                    f'the AI look at all {waiting:,} waiting payments.</div></div>', unsafe_allow_html=True)
+        return
+    s = scan.iloc[0]
+    found = q("""SELECT f.*, r.title, r.payroll_number, r.currency, r.created_on, r.stage FROM ai_findings f
+                  JOIN payrolls r USING (payroll_id) WHERE f.scan_id = ? ORDER BY f.score DESC""", (int(s["scan_id"]),))
+    cur = found["currency"].iloc[0] if len(found) else "KES"
+    test = one("SELECT result_json FROM evaluation ORDER BY id DESC LIMIT 1")
+    ai_test = json.loads(test[0]).get("ai") if test else None
+    st.markdown('<div class="kpis" style="grid-template-columns: repeat(3, minmax(0,1fr))">'
+                + kpi("Payments scanned", f"{int(s['lines']):,}", f"{plural(s['payrolls'], 'payroll')} · "
+                      f"{nice_time(s['run_at'])} · {s['seconds']:.0f}s")
+                + kpi("Found by AI", plural(len(found), "payment"),
+                      f"{money(cur, found['amount'].sum())} · all let through by the checks" if len(found) else
+                      "Nothing unusual beyond what the checks held", "bad" if len(found) else "ok")
+                + (kpi("In the practice test", f"{ai_test['ai_caught']} of {ai_test['subtle']} caught",
+                       f"The checks caught {ai_test['rules_caught']} · good payments flagged: {ai_test['ai_false_alarms']}",
+                       "ok") if ai_test else "")
+                + "</div>", unsafe_allow_html=True)
+    if found.empty:
+        return
+    st.markdown('<div class="sec">Unusual payments</div>', unsafe_allow_html=True)
+    dec = ai_decisions()
+    for f in found.to_dict("records"):
+        why = json.loads(f["why_json"])
+        done = dec.get(int(f["payment_id"]))
+        line = dict(payment_id=f["payment_id"], ben=f["ben"], amount=f["amount"], expected=None,
+                    reasons_json=json.dumps([dict(check="AI", text=w + ".") for w in why]))
+        meta = dict(currency=f["currency"], created_on=f["created_on"], payroll_id=f["payroll_id"])
+        where = f["title"] or f["payroll_number"]
+        with st.container(key=f"held-ai-{'done-' if done else ''}{f['payment_id']}"):
+            left, right = st.columns([5, 1.3], vertical_alignment="center")
+            with left:
+                st.markdown(
+                    f'<div class="h-head">{pill("Found by AI", DANGER)}<span class="h-ben">{f["ben"]}</span>'
+                    f'<span class="tag">{html.escape(where)}</span>'
+                    + (f'<span class="done">{icon("check")} {done}</span>' if done else "")
+                    + f'</div><div><span class="amt">{full_money(f["currency"], f["amount"])}</span> '
+                    f'<span class="exp">· more unusual than {100 - 100 * f["top_pct"]:.1f}% of payments</span></div>'
+                    + "".join(f'<div class="reason">{html.escape(w)}</div>' for w in why), unsafe_allow_html=True)
+            with right:
+                if not done and f["stage"] == "pending":
+                    if st.button("Hold", icon=":material/pause_circle:", key=f"aih-{f['payment_id']}", width="stretch"):
+                        decide(int(f["payroll_id"]), None, int(f["payment_id"]), "Held after AI scan", reviewer,
+                               f"{f['ben']} ({full_money(f['currency'], f['amount'])}) in {where} held after AI scan")
+                        st.session_state["toast"] = "Held for review"
+                        st.rerun()
+                    if st.button("Dismiss", icon=":material/close:", key=f"aid-{f['payment_id']}", width="stretch"):
+                        decide(int(f["payroll_id"]), None, int(f["payment_id"]), "Dismissed after AI scan", reviewer,
+                               f"{f['ben']} ({full_money(f['currency'], f['amount'])}) in {where} dismissed after AI scan")
+                        st.session_state["toast"] = "Dismissed"
+                        st.rerun()
+                if st.button("Details", icon=":material/search:", key=f"aidet-{f['payment_id']}", width="stretch"):
+                    payment_dialog(line, meta)
 
 
 # ------------------------------------------------------------------ history
 def history():
     header("History")
     log = q("""SELECT ts, event, detail FROM audit_log
-                WHERE event IN ('Released', 'Cancelled', 'Held the whole payroll', 'Sent back for re-approval')
+                WHERE event IN ('Released', 'Cancelled', 'Held the whole payroll', 'Sent back for re-approval',
+                                'Held after AI scan', 'Dismissed after AI scan')
                    OR event LIKE 'Released %' OR event = 'Copied data from the live database'
                 ORDER BY id DESC LIMIT 200""")
     if log.empty:
@@ -795,7 +909,8 @@ def history():
 
 
 # ------------------------------------------------------------------ layout
-VIEWS = {"Release desk": ":material/fact_check:", "Proof": ":material/verified:", "History": ":material/history:"}
+VIEWS = {"Release desk": ":material/fact_check:", "AI scan": ":material/auto_awesome:", "Proof": ":material/verified:",
+         "History": ":material/history:"}
 view = st.segmented_control("View", list(VIEWS), default="Release desk", key="view", label_visibility="collapsed",
                             format_func=lambda v: f"{VIEWS[v]} {v}") or "Release desk"
 if view == "Release desk":
@@ -803,6 +918,8 @@ if view == "Release desk":
         show_payroll(st.session_state["open"])
     else:
         release_desk()
+elif view == "AI scan":
+    ai_view()
 elif view == "Proof":
     proof()
 else:
