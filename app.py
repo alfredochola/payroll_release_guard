@@ -776,7 +776,7 @@ def proof():
                 'genuine raise.</div>', unsafe_allow_html=True)
 
 
-# ------------------------------------------------------------------ history and safety
+# ------------------------------------------------------------------ history
 def history():
     header("History")
     log = q("""SELECT ts, event, detail FROM audit_log
@@ -794,28 +794,8 @@ def history():
     table(pd.DataFrame({"When": [nice_time(t, "%d %b %H:%M") for t in log["ts"]], "What happened": what, "By": who}), height=600)
 
 
-def safety():
-    header("Safety")
-    a, b = st.columns(2)
-    with a:
-        st.markdown('<div class="card panel"><h4>Uses</h4><ul>'
-                    + "".join(f"<li>{icon('check')}{t}</li>" for t in (
-                        "Payment amounts and dates", "Each person's past payments", "Shared phones and bank accounts",
-                        "Who approved, and when"))
-                    + "</ul></div>", unsafe_allow_html=True)
-    with b:
-        st.markdown('<div class="card panel dark"><h4>Never uses</h4><ul>'
-                    + "".join(f"<li>{icon('x')}{t}</li>" for t in (
-                        "Names or addresses", "Readable ID, phone or account numbers", "Fingerprints",
-                        "Cards, PINs or passwords"))
-                    + "</ul></div>", unsafe_allow_html=True)
-    st.markdown(f'<div class="finding good" style="margin-top:14px">{icon("check-circle")}Reads the payroll system, never changes it. '
-                'Runs inside the bank. A person makes every decision.</div>', unsafe_allow_html=True)
-
-
 # ------------------------------------------------------------------ layout
-VIEWS = {"Release desk": ":material/fact_check:", "Proof": ":material/verified:", "History": ":material/history:",
-         "Safety": ":material/lock:"}
+VIEWS = {"Release desk": ":material/fact_check:", "Proof": ":material/verified:", "History": ":material/history:"}
 view = st.segmented_control("View", list(VIEWS), default="Release desk", key="view", label_visibility="collapsed",
                             format_func=lambda v: f"{VIEWS[v]} {v}") or "Release desk"
 if view == "Release desk":
@@ -825,7 +805,5 @@ if view == "Release desk":
         release_desk()
 elif view == "Proof":
     proof()
-elif view == "History":
-    history()
 else:
-    safety()
+    history()

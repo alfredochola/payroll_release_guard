@@ -47,7 +47,7 @@ The **Found in your test database** section shows what the Guard found in the 10
 
 ## Five-minute demo script
 
-The app has four pages: **Release desk**, **Proof**, **History** and **Safety**.
+The app has three pages: **Release desk**, **Proof** and **History**.
 
 1. **The problem (30 s).** "Once a payroll is approved, the money goes. Nobody checks each payment for an extra zero, one person hiding behind several identities, or an approval nobody really gave."
 2. **Release desk (45 s).** Three October payrolls are waiting. KES 6.3M is held before it leaves; KES 8.4M is safe to release.
@@ -55,7 +55,7 @@ The app has four pages: **Release desk**, **Proof**, **History** and **Safety**.
 4. **East (45 s).** Open it. "The same person approved twice, at 2:46 at night, 25 seconds to check 800 payments." The main button is **Send back for re-approval**.
 5. **Their own data (30 s).** Back on the desk, under **Found in your test database**: the SSP 100,000,010 payroll paid to 5 people, and 15 of 109 payrolls with approval problems.
 6. **Proof (45 s).** 550 mistakes planted in 30 practice payrolls: the Guard caught **512**, the usual "over 10 times the average" check caught **60**, and neither stopped a good payment. Say honestly that this is a practice test.
-7. **History and Safety (15 s).** Every decision is recorded with who made it. It reads the payroll system and never changes it; names and numbers are scrambled.
+7. **History (15 s).** Every decision is recorded with who made it. Say: it reads the payroll system and never changes it; names and numbers are scrambled.
 8. **Close (15 s).** "The right amount, to the right person, properly approved, before a shilling leaves."
 
 ## Honest limits
